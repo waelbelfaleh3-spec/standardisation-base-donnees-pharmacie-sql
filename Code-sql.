@@ -1,0 +1,420 @@
+-- ============================================================
+-- PROJET : Standardisation d'une Base de Données Sale
+--          Ventes d'une Pharmacie Locale
+-- Auteur  : [Ton Nom] | Data Analyst Freelance
+-- Date    : 2025
+-- Base    : SQLite (compatible PostgreSQL avec adaptations mineures)
+-- ============================================================
+-- CONTEXTE MÉTIER :
+--   Une pharmacie gérait ses ventes sur un vieux logiciel
+--   de caisse qui n'imposait aucune règle de saisie.
+--   Résultat après 2 ans : une base de données inexploitable.
+--   Un même médicament apparaît sous 5 formes différentes,
+--   les dates sont dans 3 formats distincts, des ventes sont
+--   saisies en double et les prix manquants bloquent tout
+--   calcul de marge. Ce projet nettoie et standardise
+--   l'intégralité de la base pour la rendre analysable.
+--
+-- PROBLÈMES IDENTIFIÉS DANS LES DONNÉES BRUTES :
+--   1. Noms de médicaments incohérents (casse, espaces, fautes)
+--   2. Formats de dates hétérogènes (DD/MM/YYYY, MM-DD-YYYY, YYYY-MM-DD)
+--   3. Doublons : lignes de vente saisies deux fois par erreur
+--   4. Valeurs NULL : prix manquants bloquant les calculs de marge
+-- ============================================================
+
+
+-- ============================================================
+-- PARTIE 1 : CRÉATION DE LA TABLE BRUTE
+-- ============================================================
+-- On simule exactement ce qu'on reçoit du client :
+-- une seule table plate, mal saisie, sans contraintes.
+-- C'est la réalité de 90% des missions de nettoyage.
+-- ============================================================
+
+CREATE TABLE ventes_brutes (
+    vente_id        INTEGER PRIMARY KEY,
+    medicament      TEXT,           -- Saisie libre = incohérences garanties
+    date_vente      TEXT,           -- Stocké en TEXT car formats mélangés
+    quantite        INTEGER,
+    prix_unitaire   REAL,           -- NULL quand le caissier a oublié
+    vendeur         TEXT
+);
+
+
+-- ============================================================
+-- PARTIE 2 : INSERTION DES DONNÉES SALES (50 lignes réalistes)
+-- ============================================================
+-- Chaque problème est volontairement représenté :
+--   - Casse : "doliprane", "Doliprane", "DOLIPRANE"
+--   - Espaces : "  doliprane  " (espaces avant/après)
+--   - Format date : DD/MM/YYYY vs MM-DD-YYYY vs YYYY-MM-DD
+--   - Doublons : même vente saisie deux fois (vente_id différent)
+--   - NULL : prix_unitaire manquant sur plusieurs lignes
+-- ============================================================
+
+INSERT INTO ventes_brutes VALUES
+-- Groupe 1 : Doliprane — 5 orthographes différentes
+(1,  'doliprane',       '15/01/2024', 2, 2.50,  'Karim'),
+(2,  'Doliprane',       '2024-01-18', 1, 2.50,  'Sofia'),
+(3,  'DOLIPRANE',       '01-20-2024', 3, 2.50,  'Karim'),
+(4,  '  doliprane  ',   '22/01/2024', 1, 2.50,  'Nadia'),
+(5,  'Dolipranes',      '2024-01-25', 2, 2.50,  'Sofia'),
+-- Groupe 2 : Ibuprofène — casse incohérente
+(6,  'ibuprofene',      '2024-01-10', 1, 3.80,  'Karim'),
+(7,  'Ibuprofene',      '12/01/2024', 2, 3.80,  'Sofia'),
+(8,  'IBUPROFENE',      '2024-01-15', 1, 3.80,  'Nadia'),
+(9,  '  Ibuprofene ',   '17/01/2024', 3, 3.80,  'Karim'),
+-- Groupe 3 : Amoxicilline — avec valeurs NULL
+(10, 'Amoxicilline',    '2024-02-01', 1, 8.50,  'Sofia'),
+(11, 'amoxicilline',    '05/02/2024', 2, NULL,   'Karim'),
+(12, 'AMOXICILLINE',    '2024-02-10', 1, 8.50,  'Nadia'),
+(13, 'Amoxicilline',    '02-14-2024', 2, NULL,   'Sofia'),
+(14, 'amoxicilline',    '18/02/2024', 1, 8.50,  'Karim'),
+-- Groupe 4 : Aspirine — doublons exacts
+(15, 'Aspirine',        '2024-02-20', 2, 1.90,  'Nadia'),
+(16, 'Aspirine',        '2024-02-20', 2, 1.90,  'Nadia'),  -- DOUBLON de (15)
+(17, 'aspirine',        '25/02/2024', 1, 1.90,  'Karim'),
+(18, 'ASPIRINE',        '2024-02-28', 3, 1.90,  'Sofia'),
+(19, 'Aspirine',        '2024-03-01', 1, 1.90,  'Nadia'),
+(20, 'Aspirine',        '2024-03-01', 1, 1.90,  'Nadia'),  -- DOUBLON de (19)
+-- Groupe 5 : Smecta — formats de dates variés
+(21, 'Smecta',          '05/03/2024', 2, 4.20,  'Sofia'),
+(22, 'smecta',          '2024-03-10', 1, 4.20,  'Karim'),
+(23, 'SMECTA',          '03-15-2024', 3, NULL,   'Nadia'),
+(24, 'Smecta',          '20/03/2024', 2, 4.20,  'Sofia'),
+(25, '  smecta',        '2024-03-25', 1, 4.20,  'Karim'),
+-- Groupe 6 : Voltarene
+(26, 'Voltarene',       '2024-04-02', 1, 6.50,  'Sofia'),
+(27, 'voltarene',       '05/04/2024', 2, 6.50,  'Nadia'),
+(28, 'VOLTARENE',       '2024-04-10', 1, NULL,   'Karim'),
+(29, 'Voltarene',       '04-15-2024', 3, 6.50,  'Sofia'),
+(30, '  Voltarene  ',   '20/04/2024', 1, 6.50,  'Nadia'),
+-- Groupe 7 : Toplexil
+(31, 'Toplexil',        '2024-05-01', 2, 5.30,  'Karim'),
+(32, 'toplexil',        '03/05/2024', 1, 5.30,  'Sofia'),
+(33, 'TOPLEXIL',        '2024-05-08', 3, 5.30,  'Nadia'),
+(34, 'Toplexil',        '2024-05-08', 3, 5.30,  'Nadia'),  -- DOUBLON de (33)
+(35, 'Toplexil',        '15/05/2024', 1, NULL,   'Karim'),
+-- Groupe 8 : Xyzall
+(36, 'Xyzall',          '2024-06-01', 1, 7.90,  'Sofia'),
+(37, 'xyzall',          '05/06/2024', 2, 7.90,  'Nadia'),
+(38, 'XYZALL',          '2024-06-12', 1, 7.90,  'Karim'),
+(39, 'Xyzall',          '06-18-2024', 2, NULL,   'Sofia'),
+(40, '  xyzall  ',      '25/06/2024', 3, 7.90,  'Nadia'),
+-- Groupe 9 : Dafalgan
+(41, 'Dafalgan',        '2024-07-03', 1, 3.10,  'Karim'),
+(42, 'dafalgan',        '08/07/2024', 2, 3.10,  'Sofia'),
+(43, 'DAFALGAN',        '2024-07-15', 1, 3.10,  'Nadia'),
+(44, 'Dafalgan',        '2024-07-15', 1, 3.10,  'Nadia'),  -- DOUBLON de (43)
+(45, 'dafalgan',        '22/07/2024', 3, NULL,   'Karim'),
+-- Groupe 10 : Nurofen
+(46, 'Nurofen',         '2024-08-01', 2, 4.60,  'Sofia'),
+(47, 'nurofen',         '05/08/2024', 1, 4.60,  'Nadia'),
+(48, 'NUROFEN',         '2024-08-12', 3, 4.60,  'Karim'),
+(49, 'Nurofen',         '08-20-2024', 1, NULL,   'Sofia'),
+(50, '  Nurofen  ',     '28/08/2024', 2, 4.60,  'Nadia');
+
+
+-- ============================================================
+-- PARTIE 3 : DIAGNOSTIC — Photographier les problèmes
+-- ============================================================
+-- Avant de nettoyer, on MESURE l'ampleur des dégâts.
+-- C'est ce qu'on montre au client pour justifier le travail.
+-- ============================================================
+
+
+-- ------------------------------------------------------------
+-- DIAGNOSTIC 1 : Combien de noms différents par médicament ?
+-- ------------------------------------------------------------
+-- UPPER() : met tout en majuscules pour regrouper les variantes
+-- TRIM()  : supprime les espaces avant et après
+-- ------------------------------------------------------------
+
+SELECT
+    UPPER(TRIM(medicament))      AS medicament_normalise,
+    COUNT(*)                     AS nb_variantes_trouvees,
+    GROUP_CONCAT(DISTINCT medicament, ' | ') AS formes_dans_la_base
+FROM ventes_brutes
+GROUP BY UPPER(TRIM(medicament))
+ORDER BY nb_variantes_trouvees DESC;
+
+
+-- ------------------------------------------------------------
+-- DIAGNOSTIC 2 : Identifier les doublons exacts
+-- ------------------------------------------------------------
+-- Un doublon = même médicament, même date, même quantité,
+-- même prix, même vendeur → saisie en double par erreur.
+-- ------------------------------------------------------------
+
+SELECT
+    UPPER(TRIM(medicament))      AS medicament,
+    date_vente,
+    quantite,
+    prix_unitaire,
+    vendeur,
+    COUNT(*)                     AS nb_occurrences,
+    GROUP_CONCAT(vente_id, ', ') AS ids_en_doublon
+FROM ventes_brutes
+GROUP BY
+    UPPER(TRIM(medicament)),
+    date_vente,
+    quantite,
+    prix_unitaire,
+    vendeur
+HAVING nb_occurrences > 1;
+
+
+-- ------------------------------------------------------------
+-- DIAGNOSTIC 3 : Compter les valeurs NULL et leur impact
+-- ------------------------------------------------------------
+
+SELECT
+    COUNT(*)                                         AS total_lignes,
+    SUM(CASE WHEN prix_unitaire IS NULL THEN 1 ELSE 0 END)
+                                                     AS lignes_sans_prix,
+    SUM(CASE WHEN medicament IS NULL THEN 1 ELSE 0 END)
+                                                     AS lignes_sans_medicament,
+    ROUND(
+        SUM(CASE WHEN prix_unitaire IS NULL THEN 1 ELSE 0 END) * 100.0 / COUNT(*),
+        1
+    )                                                AS pct_lignes_bloquees
+FROM ventes_brutes;
+
+
+-- ============================================================
+-- PARTIE 4 : NETTOYAGE — On corrige chaque problème
+-- ============================================================
+
+
+-- ------------------------------------------------------------
+-- NETTOYAGE 1 : Créer la table propre (structure cible)
+-- ------------------------------------------------------------
+-- Bonne pratique : on ne modifie JAMAIS la table source.
+-- On crée une table propre séparée. Ainsi :
+--   - La donnée brute originale est préservée (auditabilité)
+--   - En cas d'erreur, on peut tout recommencer sans risque
+--   - Le client peut comparer avant/après
+-- ------------------------------------------------------------
+
+CREATE TABLE ventes_propres (
+    vente_id        INTEGER PRIMARY KEY,
+    medicament      TEXT    NOT NULL,
+    date_vente      TEXT    NOT NULL,
+    quantite        INTEGER NOT NULL,
+    prix_unitaire   REAL    NOT NULL,
+    vendeur         TEXT    NOT NULL,
+    source_vente_id INTEGER
+);
+
+
+-- ------------------------------------------------------------
+-- NETTOYAGE 2 : Calculer le prix moyen par médicament
+-- ------------------------------------------------------------
+-- Pour remplacer les NULL, on calcule le prix moyen du
+-- médicament sur les lignes où le prix est renseigné.
+-- AVG() ignore automatiquement les NULL : parfait ici.
+-- ------------------------------------------------------------
+
+CREATE TEMP TABLE prix_moyens AS
+SELECT
+    UPPER(TRIM(medicament))          AS medicament_cle,
+    ROUND(AVG(prix_unitaire), 2)     AS prix_moyen
+FROM ventes_brutes
+WHERE prix_unitaire IS NOT NULL
+GROUP BY UPPER(TRIM(medicament));
+
+
+-- ------------------------------------------------------------
+-- NETTOYAGE 3 : Insérer les données nettoyées
+-- ------------------------------------------------------------
+-- On applique TOUTES les corrections en une seule requête :
+--
+--   TRIM()      → supprime les espaces parasites
+--   UPPER/LOWER → normalise la casse (ex: "Doliprane")
+--   CASE WHEN   → détecte le format de date et le convertit
+--   COALESCE    → remplace les NULL par le prix moyen
+--   GROUP BY    → élimine les doublons à la source
+-- ------------------------------------------------------------
+
+INSERT INTO ventes_propres
+SELECT
+    MIN(vb.vente_id)                AS vente_id,
+
+    -- Standardisation du nom : 1ère lettre majuscule, reste minuscule
+    -- "  DOLIPRANE  " → "Doliprane"
+    UPPER(SUBSTR(TRIM(vb.medicament), 1, 1)) ||
+    LOWER(SUBSTR(TRIM(vb.medicament), 2))    AS medicament,
+
+    -- Conversion de date : détection du format via LIKE
+    -- puis reconstruction en YYYY-MM-DD dans tous les cas
+    CASE
+        -- Format DD/MM/YYYY → extraire et réordonner
+        WHEN vb.date_vente LIKE '__/__/____'
+        THEN SUBSTR(vb.date_vente, 7, 4) || '-' ||  -- Année
+             SUBSTR(vb.date_vente, 4, 2) || '-' ||  -- Mois
+             SUBSTR(vb.date_vente, 1, 2)             -- Jour
+
+        -- Format MM-DD-YYYY → même logique avec tirets
+        WHEN vb.date_vente LIKE '__-__-____'
+        THEN SUBSTR(vb.date_vente, 7, 4) || '-' ||  -- Année
+             SUBSTR(vb.date_vente, 1, 2) || '-' ||  -- Mois
+             SUBSTR(vb.date_vente, 4, 2)             -- Jour
+
+        -- Format YYYY-MM-DD → déjà correct, on garde tel quel
+        ELSE vb.date_vente
+    END                             AS date_vente,
+
+    vb.quantite,
+
+    -- COALESCE : prend le prix réel s'il existe, sinon la moyenne
+    -- Jamais de 0 ou de valeur fictive : on utilise la vraie moyenne
+    COALESCE(vb.prix_unitaire, pm.prix_moyen) AS prix_unitaire,
+
+    TRIM(vb.vendeur)                AS vendeur,
+    vb.vente_id                     AS source_vente_id
+
+FROM ventes_brutes vb
+LEFT JOIN prix_moyens pm
+    ON UPPER(TRIM(vb.medicament)) = pm.medicament_cle
+
+-- GROUP BY : deux lignes identiques sur ces critères = doublon supprimé
+-- On applique la même conversion de date dans le GROUP BY
+-- pour ne pas rater les doublons avec formats différents
+GROUP BY
+    UPPER(TRIM(vb.medicament)),
+    CASE
+        WHEN vb.date_vente LIKE '__/__/____'
+        THEN SUBSTR(vb.date_vente, 7, 4) || '-' ||
+             SUBSTR(vb.date_vente, 4, 2) || '-' ||
+             SUBSTR(vb.date_vente, 1, 2)
+        WHEN vb.date_vente LIKE '__-__-____'
+        THEN SUBSTR(vb.date_vente, 7, 4) || '-' ||
+             SUBSTR(vb.date_vente, 1, 2) || '-' ||
+             SUBSTR(vb.date_vente, 4, 2)
+        ELSE vb.date_vente
+    END,
+    vb.quantite,
+    vb.vendeur;
+
+
+-- ============================================================
+-- PARTIE 5 : VÉRIFICATION — Prouver que le nettoyage a marché
+-- ============================================================
+
+
+-- ------------------------------------------------------------
+-- VÉRIF 1 : Rapport avant/après — Vue d'ensemble
+-- ------------------------------------------------------------
+
+SELECT '=== RAPPORT DE NETTOYAGE ===' AS rapport;
+
+SELECT
+    'AVANT' AS etape,
+    COUNT(*)                                         AS total_lignes,
+    COUNT(DISTINCT UPPER(TRIM(medicament)))          AS medicaments_distincts,
+    SUM(CASE WHEN prix_unitaire IS NULL THEN 1 ELSE 0 END)
+                                                     AS lignes_avec_null
+FROM ventes_brutes
+
+UNION ALL
+
+SELECT
+    'APRES' AS etape,
+    COUNT(*)                                         AS total_lignes,
+    COUNT(DISTINCT medicament)                       AS medicaments_distincts,
+    SUM(CASE WHEN prix_unitaire IS NULL THEN 1 ELSE 0 END)
+                                                     AS lignes_avec_null
+FROM ventes_propres;
+
+
+-- ------------------------------------------------------------
+-- VÉRIF 2 : Contrôle des noms standardisés
+-- ------------------------------------------------------------
+
+SELECT
+    medicament,
+    COUNT(*)         AS nb_ventes,
+    MIN(date_vente)  AS premiere_vente,
+    MAX(date_vente)  AS derniere_vente
+FROM ventes_propres
+GROUP BY medicament
+ORDER BY medicament ASC;
+
+
+-- ------------------------------------------------------------
+-- VÉRIF 3 : Contrôle des dates — doit retourner 0 ligne
+-- ------------------------------------------------------------
+
+SELECT
+    COUNT(*) AS dates_mal_formatees
+FROM ventes_propres
+WHERE date_vente NOT LIKE '____-__-__';
+
+
+-- ------------------------------------------------------------
+-- VÉRIF 4 : Contrôle des NULL — doit retourner 0
+-- ------------------------------------------------------------
+
+SELECT
+    COUNT(*) AS prix_null_restants
+FROM ventes_propres
+WHERE prix_unitaire IS NULL;
+
+
+-- ============================================================
+-- PARTIE 6 : ANALYSES POST-NETTOYAGE
+-- ============================================================
+-- Maintenant que la base est propre, on peut enfin répondre
+-- aux vraies questions métier de la pharmacie.
+-- ============================================================
+
+
+-- ------------------------------------------------------------
+-- ANALYSE 1 : Chiffre d'affaires par médicament
+-- ------------------------------------------------------------
+-- Impossible à calculer AVANT nettoyage à cause des NULL
+-- et des noms en doublon. Maintenant c'est trivial.
+-- ------------------------------------------------------------
+
+SELECT
+    medicament,
+    COUNT(*)                                         AS nb_ventes,
+    SUM(quantite)                                    AS unites_vendues,
+    ROUND(SUM(quantite * prix_unitaire), 2)          AS ca_total,
+    ROUND(AVG(prix_unitaire), 2)                     AS prix_moyen
+FROM ventes_propres
+GROUP BY medicament
+ORDER BY ca_total DESC;
+
+
+-- ------------------------------------------------------------
+-- ANALYSE 2 : Performance par vendeur
+-- ------------------------------------------------------------
+
+SELECT
+    vendeur,
+    COUNT(*)                                         AS nb_ventes,
+    SUM(quantite)                                    AS unites_vendues,
+    ROUND(SUM(quantite * prix_unitaire), 2)          AS ca_total,
+    ROUND(
+        SUM(quantite * prix_unitaire) * 100.0 /
+        (SELECT SUM(quantite * prix_unitaire) FROM ventes_propres),
+        1
+    )                                                AS part_ca_pct
+FROM ventes_propres
+GROUP BY vendeur
+ORDER BY ca_total DESC;
+
+
+-- ------------------------------------------------------------
+-- ANALYSE 3 : Évolution mensuelle du CA
+-- ------------------------------------------------------------
+
+SELECT
+    strftime('%Y-%m', date_vente)                    AS mois,
+    COUNT(*)                                         AS nb_ventes,
+    SUM(quantite)                                    AS unites_vendues,
+    ROUND(SUM(quantite * prix_unitaire), 2)          AS ca_mensuel
+FROM ventes_propres
+GROUP BY mois
+ORDER BY mois ASC;
